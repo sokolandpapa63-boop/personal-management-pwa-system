@@ -1,6 +1,7 @@
 "use client";
 
 import { create } from "zustand";
+import { persist, createJSONStorage } from "zustand/middleware";
 
 export type AuthUser = {
   id: string;
@@ -18,14 +19,28 @@ type AuthState = {
   clear: () => void;
 };
 
-export const useAuthStore = create<AuthState>((set) => ({
-  accessToken: null,
-  user: null,
-  status: "boot",
-  setAuth: (token, user) => set({ accessToken: token, user, status: "authed" }),
-  setBooted: () => set((s) => ({ status: s.status === "boot" ? "guest" : s.status })),
-  clear: () => set({ accessToken: null, user: null, status: "guest" }),
-}));
+export const useAuthStore = create<AuthState>()(
+  persist(
+    (set) => ({
+      accessToken: null,
+      user: null,
+      status: "boot",
+      setAuth: (token, user) => set({ accessToken: token, user, status: "authed" }),
+      setBooted: () => set((s) => ({ status: s.status === "boot" ? "guest" : s.status })),
+      clear: () => set({ accessToken: null, user: null, status: "guest" }),
+    }),
+    {
+      name: "ms-auth",
+      storage: createJSONStorage(() => localStorage),
+      // Сохраняем только эти поля, чтобы не тащить "boot" с собой
+      partialize: (state) => ({
+        accessToken: state.accessToken,
+        user: state.user,
+        status: state.status === "authed" ? "authed" : "guest",
+      }),
+    },
+  ),
+);
 
 export type Toast = {
   id: number;
