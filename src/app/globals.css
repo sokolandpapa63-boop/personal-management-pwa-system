@@ -24,24 +24,26 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
-/* Фоновая сцена — «выключенный экран» */
+/* Фоновая сцена — чистый чёрный, без цветных пятен */
 .app-bg {
   position: fixed;
   inset: 0;
   z-index: -1;
+  background: var(--bg);
+  /* Если захотите вернуть лёгкое свечение — раскомментируйте и подстройте прозрачности:
   background:
-    radial-gradient(1100px 500px at 85% -10%, rgba(34, 211, 238, 0.07), transparent 60%),
-    radial-gradient(900px 600px at -10% 30%, rgba(129, 140, 248, 0.06), transparent 55%),
-    radial-gradient(700px 500px at 50% 110%, rgba(52, 211, 153, 0.04), transparent 60%),
+    radial-gradient(1100px 500px at 85% -10%, rgba(34, 211, 238, 0.05), transparent 60%),
+    radial-gradient(900px 600px at -10% 30%, rgba(129, 140, 248, 0.04), transparent 55%),
     var(--bg);
+  */
 }
 .app-bg::after {
   content: "";
   position: absolute;
   inset: 0;
   background-image:
-    linear-gradient(rgba(34, 211, 238, 0.025) 1px, transparent 1px),
-    linear-gradient(90deg, rgba(34, 211, 238, 0.025) 1px, transparent 1px);
+    linear-gradient(rgba(255, 255, 255, 0.018) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.018) 1px, transparent 1px);
   background-size: 44px 44px;
   mask-image: radial-gradient(ellipse 90% 70% at 50% 0%, black 30%, transparent 75%);
 }
