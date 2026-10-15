@@ -1,12 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 
-/**
- * useState, который сохраняет значение в localStorage
- * и восстанавливает его при монтировании.
- * Безопасен для SSR: на сервере возвращает initialValue.
- */
 export function usePersistentState<T>(key: string, initialValue: T) {
   const [value, setValue] = useState<T>(() => {
     if (typeof window === "undefined") return initialValue;
@@ -22,9 +17,7 @@ export function usePersistentState<T>(key: string, initialValue: T) {
     if (typeof window === "undefined") return;
     try {
       window.localStorage.setItem(key, JSON.stringify(value));
-    } catch {
-      /* quota exceeded — игнорируем */
-    }
+    } catch {}
   }, [key, value]);
 
   return [value, setValue] as const;
