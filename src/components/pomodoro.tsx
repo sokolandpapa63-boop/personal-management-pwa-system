@@ -8,6 +8,7 @@ import { browserNotify } from "@/lib/client/realtime";
 import { toast } from "@/lib/client/stores";
 import { useSections, useSettings, useTasks } from "@/lib/client/hooks";
 import { Button, cn, Select } from "@/components/ui";
+import { usePersistentState } from "@/lib/client/usePersistentState";
 
 type Mode = "work" | "short_break" | "long_break";
 
@@ -50,22 +51,58 @@ export function PomodoroWidget() {
   const longMin = settings?.pomodoroLongBreak ?? 15;
   const cycleLen = settings?.pomodoroCycles ?? 4;
 
-  const durationFor = (mode: Mode) =>
-    (mode === "work" ? workMin : mode === "short_break" ? shortMin : longMin) * 60;
+  const durationFor = (m: Mode) =>
+    (m === "work" ? workMin : m === "short_break" ? shortMin : longMin) * 60;
 
-  const [mode, setMode] = useState<Mode>("work");
-  const [remaining, setRemaining] = useState(workMin * 60);
-  const [total, setTotal] = useState(workMin * 60);
-  const [running, setRunning] = useState(false);
-  const [cycle, setCycle] = useState(0);
-  const [sessionId, setSessionId] = useState<string | null>(null);
-  const [sectionId, setSectionId] = useState<string>("");
-  const [taskId, setTaskId] = useState<string>("");
+  // ─── Состояние, которое переживает перезагрузку ───
+  const [mode, setMode] = usePersistentState<Mode>("pomodoro:mode", "work");
+  const [running, setRunning] = usePersistentState<boolean>("pomodoro:running", false);
+  const [cycle, setCycle] = usePersistentState<number>("pomodoro:cycle", 0);
+  const [sessionId, setSessionId] = usePersistentState<string | null>("pomodoro:sessionId", null);
+  const [sectionId, setSectionId] = usePersistentState<string>("pomodoro:sectionId", "");
+  const [taskId, setTaskId] = usePersistentState<string>("pomodoro:taskId", "");
+  const [endAt, setEndAt] = usePersistentState<number>("pomodoro:endAt", 0);
+  const [total, setTotal] = usePersistentState<number>("pomodoro:total", durationFor("work"));
+
+  // remaining — производное, не сохраняем
+  const [remaining, setRemaining] = useState<number>(() => {
+    if (typeof window === "undefined") return workMin * 60;
+    const e = Number(window.localStorage.getItem("pomodoro:endAt") ?? 0);
+    const r = Number(window.localStorage.getItem("pomodoro:running") ?? "false");
+    if (r && e > Date.now()) return Math.round((e - Date.now()) / 1000);
+    return workMin * 60;
+  });
+
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const endAtRef = useRef<number>(0);
 
   const tableSections = useMemo(() => sections.filter((s) => s.kind === "table"), [sections]);
 
+  // ─── Эффект: восстанавливаем таймер при монтировании ───
+  useEffect(() => {
+    if (!running || endAt <= Date.now()) {
+      if (running && endAt > 0 && endAt <= Date.now()) {
+        // время вышло, пока вкладка была закрыта — завершаем
+        void finish(true);
+      }
+      return;
+    }
+
+    const tick = () => {
+      const left = Math.max(0, Math.round((endAt - Date.now()) / 1000));
+      setRemaining(left);
+      if (left <= 0) void finish(true);
+    };
+
+    tick();
+    intervalRef.current = setInterval(tick, 250);
+
+    return () => {
+      if (intervalRef.current) clearInterval(intervalRef.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [running, endAt]);
+
+  // ─── Сброс длительности при смене режима, только если таймер не идёт ───
   useEffect(() => {
     if (!running) {
       const d = durationFor(mode);
@@ -75,16 +112,25 @@ export function PomodoroWidget() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [mode, workMin, shortMin, longMin]);
 
-  useEffect(() => () => { if (intervalRef.current) clearInterval(intervalRef.current); }, []);
+  useEffect(() => () => {
+    if (intervalRef.current) clearInterval(intervalRef.current);
+  }, []);
 
   async function start() {
     if (running) return;
+    const d = durationFor(mode);
+    const newEndAt = Date.now() + d * 1000;
+
     setRunning(true);
+    setEndAt(newEndAt);
+    setTotal(d);
+    setRemaining(d);
+
     try {
       const res = await api<{ session: { id: string } }>("/pomodoro/start", {
         method: "POST",
         body: {
-          duration: Math.round(total / 60),
+          duration: Math.round(d / 60),
           type: mode,
           sectionId: mode === "work" && sectionId ? sectionId : null,
           taskId: mode === "work" && taskId ? taskId : null,
@@ -92,39 +138,41 @@ export function PomodoroWidget() {
       });
       setSessionId(res.session.id);
     } catch {
-      /* оффлайн — работаем локально */
       setSessionId(null);
     }
-    endAtRef.current = Date.now() + remaining * 1000;
-    intervalRef.current = setInterval(() => {
-      const left = Math.max(0, Math.round((endAtRef.current - Date.now()) / 1000));
-      setRemaining(left);
-      if (left <= 0) finish();
-    }, 250);
   }
 
   function pause() {
     setRunning(false);
+    setEndAt(0);
     if (intervalRef.current) clearInterval(intervalRef.current);
   }
 
-  async function finish() {
+  async function finish(fromRestore = false) {
     pause();
     setRemaining(0);
     if (sessionId) {
       await api(`/pomodoro/${sessionId}/finish`, { method: "POST" }).catch(() => undefined);
+      setSessionId(null);
     }
     queryClient.invalidateQueries({ queryKey: ["pomodoro"] });
+
+    if (!fromRestore) {
+      if (mode === "work") {
+        beep();
+        browserNotify("Pomodoro: фокус завершён", "Время перерыва");
+        toast.success("Фокус завершён", "Отдохните немного");
+      } else {
+        beep();
+        browserNotify("Перерыв окончен", "Возвращаемся к работе");
+      }
+    }
+
     if (mode === "work") {
-      beep();
-      browserNotify("Pomodoro: фокус завершён", "Время перерыва");
-      toast.success("Фокус завершён", "Отдохните немного");
       const nextCycle = cycle + 1;
       setCycle(nextCycle);
       setMode(nextCycle % cycleLen === 0 ? "long_break" : "short_break");
     } else {
-      beep();
-      browserNotify("Перерыв окончен", "Возвращаемся к работе");
       setMode("work");
     }
   }
@@ -138,6 +186,7 @@ export function PomodoroWidget() {
     const d = durationFor(mode);
     setRemaining(d);
     setTotal(d);
+    setEndAt(0);
   }
 
   const mm = String(Math.floor(remaining / 60)).padStart(2, "0");
