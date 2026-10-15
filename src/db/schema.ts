@@ -166,8 +166,12 @@ export const pomodoroSessions = pgTable(
     taskId: uuid("task_id"),
     startedAt: timestamp("started_at", { withTimezone: true }).notNull().defaultNow(),
     finishedAt: timestamp("finished_at", { withTimezone: true }),
-    duration: integer("duration").notNull(), // minutes (planned)
-    type: text("type").notNull(), // work | short_break | long_break
+    pausedAt: timestamp("paused_at", { withTimezone: true }),
+    endAt: timestamp("end_at", { withTimezone: true }),
+    remainingSec: integer("remaining_sec"),
+    duration: integer("duration").notNull(),
+    type: text("type").notNull(),
+    status: text("status").notNull().default("active"),
     completed: boolean("completed").notNull().default(false),
   },
   (t) => [index("pomodoro_user_started_idx").on(t.userId, t.startedAt)],

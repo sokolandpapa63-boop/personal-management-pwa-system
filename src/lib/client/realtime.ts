@@ -53,7 +53,7 @@ export function startRealtime(queryClient: QueryClient): () => void {
       "event.created", "event.updated", "event.deleted", "event.reminder",
       "record.created", "record.updated", "record.deleted",
       "section.created", "section.updated", "section.deleted",
-      "pomodoro.started", "pomodoro.finished",
+      "pomodoro.updated",
       "report.ready", "currency.updated", "studySession.updated",
     ];
     for (const t of types) es.addEventListener(t, forward(t));
@@ -78,6 +78,7 @@ export function startRealtime(queryClient: QueryClient): () => void {
 }
 
 function handleEvent(type: string, payload: Record<string, unknown>, queryClient: QueryClient) {
+  fireRealtime(type, payload);
   const rule = INVALIDATIONS.find(([prefix]) => type.startsWith(prefix));
   if (rule) {
     for (const key of rule[1]) queryClient.invalidateQueries({ queryKey: [key] });
@@ -90,9 +91,9 @@ function handleEvent(type: string, payload: Record<string, unknown>, queryClient
   if (type === "currency.updated") {
     toast.info("Курсы валют обновлены");
   }
-  if (type === "pomodoro.finished" && payload.completed) {
-    browserNotify("Pomodoro завершён", payload.type === "work" ? "Время перерыва" : "Возвращаемся к работе");
-  }
+  if (type === "pomodoro.updated" && payload.status === "completed" && payload.type === "work") {
+  browserNotify("Pomodoro завершён", "Время перерыва");
+}
   if (type === "studySession.updated" && payload.transition) {
     const text =
       payload.transition === "started"
@@ -111,4 +112,22 @@ function handleEvent(type: string, payload: Record<string, unknown>, queryClient
     toast.info(title, "Скоро начало");
     browserNotify(title, "Скоро начало");
   }
+}
+  // ─── Клиентская шина для UI-подписок ───
+type Listener = (payload: Record<string, unknown>) => void;
+const g = globalThis as unknown as { __msClientBus?: Map<string, Set<Listener>> };
+const clientBus = g.__msClientBus ?? (g.__msClientBus = new Map());
+
+export function onRealtime(type: string, listener: Listener): () => void {
+  const set = clientBus.get(type) ?? new Set();
+  set.add(listener);
+  clientBus.set(type, set);
+  return () => {
+    set.delete(listener);
+  };
+}
+
+export function fireRealtime(type: string, payload: Record<string, unknown>) {
+  const set = clientBus.get(type);
+  if (set) for (const l of set) l(payload);
 }

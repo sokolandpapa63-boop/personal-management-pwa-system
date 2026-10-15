@@ -4,12 +4,25 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Link2, Pause, Play, RotateCcw } from "lucide-react";
 import { api } from "@/lib/client/api";
-import { browserNotify } from "@/lib/client/realtime";
+import { browserNotify, onRealtime } from "@/lib/client/realtime";
 import { toast } from "@/lib/client/stores";
 import { useSections, useSettings, useTasks } from "@/lib/client/hooks";
 import { Button, cn, Select } from "@/components/ui";
 
 type Mode = "work" | "short_break" | "long_break";
+type Status = "idle" | "active" | "paused";
+
+type ServerSession = {
+  id: string;
+  status: "active" | "paused" | "completed" | "cancelled";
+  type: Mode;
+  startedAt: string;
+  endAt: string | null;
+  remainingSec: number | null;
+  duration: number;
+  sectionId: string | null;
+  taskId: string | null;
+};
 
 const MODE_LABEL: Record<Mode, string> = {
   work: "Фокус",
@@ -34,9 +47,7 @@ function beep() {
       osc.start(t);
       osc.stop(t + 0.22);
     });
-  } catch {
-    /* звук недоступен */
-  }
+  } catch {}
 }
 
 export function PomodoroWidget() {
@@ -50,91 +61,187 @@ export function PomodoroWidget() {
   const longMin = settings?.pomodoroLongBreak ?? 15;
   const cycleLen = settings?.pomodoroCycles ?? 4;
 
-  const durationFor = (mode: Mode) =>
-    (mode === "work" ? workMin : mode === "short_break" ? shortMin : longMin) * 60;
+  const durationFor = (m: Mode) =>
+    (m === "work" ? workMin : m === "short_break" ? shortMin : longMin) * 60;
 
   const [mode, setMode] = useState<Mode>("work");
-  const [remaining, setRemaining] = useState(workMin * 60);
-  const [total, setTotal] = useState(workMin * 60);
-  const [running, setRunning] = useState(false);
   const [cycle, setCycle] = useState(0);
-  const [sessionId, setSessionId] = useState<string | null>(null);
   const [sectionId, setSectionId] = useState<string>("");
   const [taskId, setTaskId] = useState<string>("");
-  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
-  const endAtRef = useRef<number>(0);
 
+  const [sessionId, setSessionId] = useState<string | null>(null);
+  const [status, setStatus] = useState<Status>("idle");
+  const [endAt, setEndAt] = useState<number | null>(null);
+  const [pausedRemaining, setPausedRemaining] = useState<number>(0);
+  const [total, setTotal] = useState<number>(durationFor("work"));
+  const [remaining, setRemaining] = useState<number>(durationFor("work"));
+
+  const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const tableSections = useMemo(() => sections.filter((s) => s.kind === "table"), [sections]);
 
+  function applyServerSession(s: ServerSession) {
+    setSessionId(s.id);
+    setMode(s.type);
+    setTotal(s.duration * 60);
+    if (s.sectionId) setSectionId(s.sectionId);
+    if (s.taskId) setTaskId(s.taskId);
+
+    if (s.status === "active" && s.endAt) {
+      setStatus("active");
+      setEndAt(new Date(s.endAt).getTime());
+      setPausedRemaining(0);
+    } else if (s.status === "paused") {
+      setStatus("paused");
+      setEndAt(null);
+      setPausedRemaining(s.remainingSec ?? 0);
+      setRemaining(s.remainingSec ?? 0);
+    } else {
+      setStatus("idle");
+      setEndAt(null);
+      setSessionId(null);
+      setPausedRemaining(0);
+      setRemaining(durationFor(s.type));
+    }
+  }
+
+  // Восстановление при монтировании
   useEffect(() => {
-    if (!running) {
+    let cancelled = false;
+    async function load() {
+      try {
+        const res = await api<{ session: ServerSession | null }>("/pomodoro/current");
+        if (cancelled) return;
+        if (res.session) applyServerSession(res.session);
+      } catch {}
+    }
+    void load();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Подписка на SSE
+  useEffect(() => {
+    const off = onRealtime("pomodoro.updated", (payload) => {
+      applyServerSession(payload as unknown as ServerSession);
+    });
+    return off;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Локальный тик
+  useEffect(() => {
+    if (status !== "active" || !endAt) {
+      if (intervalRef.current) clearInterval(intervalRef.current);
+      return;
+    }
+    const tick = () => {
+      const left = Math.max(0, Math.round((endAt - Date.now()) / 1000));
+      setRemaining(left);
+      if (left <= 0) void finish(true);
+    };
+    tick();
+    intervalRef.current = setInterval(tick, 250);
+    return () => {
+      if (intervalRef.current) clearInterval(intervalRef.current);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [status, endAt]);
+
+  useEffect(() => {
+    if (status === "idle") {
       const d = durationFor(mode);
       setRemaining(d);
       setTotal(d);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [mode, workMin, shortMin, longMin]);
-
-  useEffect(() => () => { if (intervalRef.current) clearInterval(intervalRef.current); }, []);
+  }, [mode, workMin, shortMin, longMin, status]);
 
   async function start() {
-    if (running) return;
-    setRunning(true);
+    if (status === "active") return;
+
+    if (status === "paused" && sessionId) {
+      try {
+        const res = await api<{ session: ServerSession }>(`/pomodoro/${sessionId}/resume`, {
+          method: "POST",
+          body: { remainingSec: pausedRemaining },
+        });
+        applyServerSession(res.session);
+      } catch {
+        toast.error("Не удалось продолжить");
+      }
+      return;
+    }
+
+    const d = durationFor(mode);
     try {
-      const res = await api<{ session: { id: string } }>("/pomodoro/start", {
+      const res = await api<{ session: ServerSession }>("/pomodoro/start", {
         method: "POST",
         body: {
-          duration: Math.round(total / 60),
+          duration: Math.round(d / 60),
           type: mode,
           sectionId: mode === "work" && sectionId ? sectionId : null,
           taskId: mode === "work" && taskId ? taskId : null,
         },
       });
-      setSessionId(res.session.id);
+      applyServerSession(res.session);
     } catch {
-      /* оффлайн — работаем локально */
-      setSessionId(null);
+      toast.error("Не удалось запустить");
     }
-    endAtRef.current = Date.now() + remaining * 1000;
-    intervalRef.current = setInterval(() => {
-      const left = Math.max(0, Math.round((endAtRef.current - Date.now()) / 1000));
-      setRemaining(left);
-      if (left <= 0) finish();
-    }, 250);
   }
 
-  function pause() {
-    setRunning(false);
-    if (intervalRef.current) clearInterval(intervalRef.current);
+  async function pause() {
+    if (status !== "active" || !sessionId || !endAt) return;
+    const left = Math.max(0, Math.round((endAt - Date.now()) / 1000));
+    try {
+      const res = await api<{ session: ServerSession }>(`/pomodoro/${sessionId}/pause`, {
+        method: "POST",
+        body: { remainingSec: left },
+      });
+      applyServerSession(res.session);
+    } catch {
+      toast.error("Не удалось поставить на паузу");
+    }
   }
 
-  async function finish() {
-    pause();
-    setRemaining(0);
-    if (sessionId) {
-      await api(`/pomodoro/${sessionId}/finish`, { method: "POST" }).catch(() => undefined);
-    }
+  async function finish(fromTimer = false) {
+    if (!sessionId) return;
+    try {
+      await api(`/pomodoro/${sessionId}/finish`, { method: "POST" });
+    } catch {}
+    const finishedMode = mode;
+    setStatus("idle");
+    setEndAt(null);
+    setSessionId(null);
+    setPausedRemaining(0);
     queryClient.invalidateQueries({ queryKey: ["pomodoro"] });
-    if (mode === "work") {
+
+    if (fromTimer) {
       beep();
-      browserNotify("Pomodoro: фокус завершён", "Время перерыва");
-      toast.success("Фокус завершён", "Отдохните немного");
-      const nextCycle = cycle + 1;
-      setCycle(nextCycle);
-      setMode(nextCycle % cycleLen === 0 ? "long_break" : "short_break");
+      if (finishedMode === "work") {
+        browserNotify("Pomodoro: фокус завершён", "Время перерыва");
+        toast.success("Фокус завершён", "Отдохните немного");
+        const nextCycle = cycle + 1;
+        setCycle(nextCycle);
+        setMode(nextCycle % cycleLen === 0 ? "long_break" : "short_break");
+      } else {
+        browserNotify("Перерыв окончен", "Возвращаемся к работе");
+        setMode("work");
+      }
     } else {
-      beep();
-      browserNotify("Перерыв окончен", "Возвращаемся к работе");
-      setMode("work");
+      setRemaining(durationFor(finishedMode));
     }
   }
 
   async function reset() {
-    pause();
     if (sessionId) {
-      await api(`/pomodoro/${sessionId}/cancel`, { method: "POST" }).catch(() => undefined);
-      setSessionId(null);
+      try {
+        await api(`/pomodoro/${sessionId}/cancel`, { method: "POST" });
+      } catch {}
     }
+    setStatus("idle");
+    setEndAt(null);
+    setSessionId(null);
+    setPausedRemaining(0);
     const d = durationFor(mode);
     setRemaining(d);
     setTotal(d);
@@ -156,10 +263,7 @@ export function PomodoroWidget() {
         </div>
         <div className="flex items-center gap-1">
           {Array.from({ length: cycleLen }).map((_, i) => (
-            <span
-              key={i}
-              className={cn("h-1.5 w-4 rounded-full transition-colors", i < cycle % cycleLen || (cycle > 0 && cycle % cycleLen === 0 && mode !== "work") ? "bg-cyan-400" : "bg-slate-700")}
-            />
+            <span key={i} className={cn("h-1.5 w-4 rounded-full transition-colors", i < cycle % cycleLen ? "bg-cyan-400" : "bg-slate-700")} />
           ))}
         </div>
       </div>
@@ -179,7 +283,7 @@ export function PomodoroWidget() {
         </svg>
         <div className="absolute inset-0 flex flex-col items-center justify-center">
           <span className="font-display num text-4xl font-semibold tracking-wider text-slate-50">
-            {mm}<span className={cn("transition-opacity", running && "tick-digit")}>:</span>{ss}
+            {mm}<span className={cn("transition-opacity", status === "active" && "tick-digit")}>:</span>{ss}
           </span>
           <span className="mt-1 text-[10px] uppercase tracking-[0.22em] text-slate-500">
             цикл {Math.min(cycle + 1, cycleLen)}/{cycleLen}
@@ -188,10 +292,14 @@ export function PomodoroWidget() {
       </div>
 
       <div className="mt-3 flex items-center justify-center gap-2">
-        {!running ? (
-          <Button onClick={start} className="min-w-[104px]"><Play size={15} /> Старт</Button>
+        {status !== "active" ? (
+          <Button onClick={start} className="min-w-[104px]">
+            <Play size={15} /> {status === "paused" ? "Продолжить" : "Старт"}
+          </Button>
         ) : (
-          <Button onClick={pause} variant="outline" className="min-w-[104px]"><Pause size={15} /> Пауза</Button>
+          <Button onClick={pause} variant="outline" className="min-w-[104px]">
+            <Pause size={15} /> Пауза
+          </Button>
         )}
         <Button onClick={reset} variant="ghost" size="icon" title="Сброс"><RotateCcw size={15} /></Button>
       </div>
