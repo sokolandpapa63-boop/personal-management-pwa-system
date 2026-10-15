@@ -4,7 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { Link2, Pause, Play, RotateCcw } from "lucide-react";
 import { api } from "@/lib/client/api";
-import { browserNotify, onRealtime } from "@/lib/client/realtime";
+import { browserNotify } from "@/lib/client/realtime";
 import { toast } from "@/lib/client/stores";
 import { useSections, useSettings, useTasks } from "@/lib/client/hooks";
 import { Button, cn, Select } from "@/components/ui";
@@ -77,6 +77,7 @@ export function PomodoroWidget() {
   const [remaining, setRemaining] = useState<number>(durationFor("work"));
 
   const intervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const tableSections = useMemo(() => sections.filter((s) => s.kind === "table"), [sections]);
 
   function applyServerSession(s: ServerSession) {
@@ -104,9 +105,10 @@ export function PomodoroWidget() {
     }
   }
 
-  // Восстановление при монтировании
+  // Восстановление при монтировании + polling каждые 3 секунды
   useEffect(() => {
     let cancelled = false;
+
     async function load() {
       try {
         const res = await api<{ session: ServerSession | null }>("/pomodoro/current");
@@ -114,21 +116,17 @@ export function PomodoroWidget() {
         if (res.session) applyServerSession(res.session);
       } catch {}
     }
+
     void load();
-    return () => { cancelled = true; };
+    pollRef.current = setInterval(load, 3000);
+    return () => {
+      cancelled = true;
+      if (pollRef.current) clearInterval(pollRef.current);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Подписка на SSE
-  useEffect(() => {
-    const off = onRealtime("pomodoro.updated", (payload) => {
-      applyServerSession(payload as unknown as ServerSession);
-    });
-    return off;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
-
-  // Локальный тик
+  // Локальный тик каждые 250 мс
   useEffect(() => {
     if (status !== "active" || !endAt) {
       if (intervalRef.current) clearInterval(intervalRef.current);
@@ -147,6 +145,7 @@ export function PomodoroWidget() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [status, endAt]);
 
+  // Обновление длительности, когда таймер не идёт
   useEffect(() => {
     if (status === "idle") {
       const d = durationFor(mode);
