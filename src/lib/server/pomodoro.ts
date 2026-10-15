@@ -50,7 +50,6 @@ export async function startSession(
   userId: string,
   args: { duration: number; type: Mode; sectionId?: string | null; taskId?: string | null },
 ): Promise<Session> {
-  // если есть активная/паузнутая — вернуть её вместо создания новой
   const existing = await getCurrent(userId);
   if (existing) return existing;
 
