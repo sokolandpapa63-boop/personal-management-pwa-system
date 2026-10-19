@@ -81,6 +81,7 @@ export type Settings = {
   notifyReport: boolean;
   notifySession: boolean;
   leadTimeMinutes: number;
+  hyperfocusPlan?: Record<string, string[]>;
 };
 
 export type StudySession = {
