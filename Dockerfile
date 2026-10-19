@@ -9,7 +9,9 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 ENV NEXT_TELEMETRY_DISABLED=1
-RUN npx drizzle-kit push || true
+# Миграции должны падать явно, а не молча проглатываться.
+# Если схема не применилась — сборка должна упасть.
+RUN npx drizzle-kit push
 RUN npm run build
 
 FROM node:20-alpine AS runner
