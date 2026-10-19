@@ -27,12 +27,54 @@ function WidgetHeader({ title, action }: { title: string; action?: React.ReactNo
 // ── Гиперфокус дня ──────────────────────────────────────────────────────────
 const DAYS_RU = ["Воскресенье", "Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота"];
 
+/** Приглушённые цвета для строк гиперфокуса — в тон дизайн-системе. */
+const HYPE_COLORS: Record<string, { border: string; bg: string; dot: string; text: string }> = {
+  cyan:    { border: "border-cyan-500/25",    bg: "from-cyan-500/10",    dot: "bg-cyan-400",    text: "text-cyan-100" },
+  indigo:  { border: "border-indigo-500/25",  bg: "from-indigo-500/10",  dot: "bg-indigo-400",  text: "text-indigo-100" },
+  emerald: { border: "border-emerald-500/25", bg: "from-emerald-500/10", dot: "bg-emerald-400", text: "text-emerald-100" },
+  amber:   { border: "border-amber-500/25",   bg: "from-amber-500/10",   dot: "bg-amber-400",   text: "text-amber-100" },
+  rose:    { border: "border-rose-500/25",    bg: "from-rose-500/10",    dot: "bg-rose-400",    text: "text-rose-100" },
+  violet:  { border: "border-violet-500/25",  bg: "from-violet-500/10",  dot: "bg-violet-400",  text: "text-violet-100" },
+  slate:   { border: "border-slate-500/25",   bg: "from-slate-500/10",   dot: "bg-slate-400",   text: "text-slate-100" },
+};
+const HYPE_DEFAULT = HYPE_COLORS.cyan;
+
+type HypeItem = { text: string; color?: string };
+
+function normalizeHype(raw: unknown): Record<string, HypeItem[]> {
+  const out: Record<string, HypeItem[]> = {};
+  if (!raw || typeof raw !== "object") return out;
+  for (const [day, list] of Object.entries(raw as Record<string, unknown>)) {
+    if (!/^[0-6]$/.test(day) || !Array.isArray(list)) continue;
+    out[day] = list
+      .map((x): HypeItem | null => {
+        if (typeof x === "string") return x.trim() ? { text: x } : null;
+        if (x && typeof x === "object") {
+          const o = x as Record<string, unknown>;
+          const text = typeof o.text === "string" ? o.text : "";
+          const color = typeof o.color === "string" ? o.color : undefined;
+          return text.trim() ? { text, color } : null;
+        }
+        return null;
+      })
+      .filter((x): x is HypeItem => x !== null);
+  }
+  return out;
+}
+
 export function HyperfocusWidget() {
-  const settings = useSettings().data;
-  const today = new Date().getDay(); // 0 (Вс) - 6 (Сб)
-  
-  const plan = settings?.hyperfocusPlan || {};
-  const todayTasks = plan[today.toString()] || [];
+  const settingsQuery = useSettings();
+  const settings = settingsQuery.data;
+
+  // День недели в поясе Europe/Moscow (0 = Вс, 1 = Пн, ... 6 = Сб).
+  const weekday = useMemo(() => {
+    const name = new Intl.DateTimeFormat("en-US", { timeZone: TZ, weekday: "short" }).format(new Date());
+    const map: Record<string, number> = { Sun: 0, Mon: 1, Tue: 2, Wed: 3, Thu: 4, Fri: 5, Sat: 6 };
+    return map[name] ?? new Date().getDay();
+  }, []);
+
+  const plan = normalizeHype(settings?.hyperfocusPlan);
+  const todayTasks = plan[String(weekday)] ?? [];
 
   return (
     <div className="flex h-full flex-col justify-between">
@@ -44,25 +86,36 @@ export function HyperfocusWidget() {
           </p>
         </div>
         <span className="rounded-full bg-cyan-400/10 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-cyan-300">
-          {DAYS_RU[today]}
+          {DAYS_RU[weekday]}
         </span>
       </div>
 
       <div className="flex flex-1 flex-col justify-center gap-2">
-        {todayTasks.length === 0 ? (
+        {settingsQuery.isLoading ? (
+          <p className="text-center text-sm text-slate-500">Загрузка…</p>
+        ) : todayTasks.length === 0 ? (
           <p className="text-center text-sm text-slate-500 italic">
             На сегодня фокус не задан. Настройте его в меню.
           </p>
         ) : (
-          todayTasks.map((text, i) => (
-            <div 
-              key={i} 
-              className="flex items-center gap-3 rounded-xl border border-cyan-500/20 bg-gradient-to-r from-cyan-500/10 to-transparent p-3"
-            >
-              <div className="h-2 w-2 rounded-full bg-cyan-400 animate-pulse" />
-              <span className="font-display text-lg font-medium text-slate-50">{text}</span>
-            </div>
-          ))
+          todayTasks.map((item, i) => {
+            const c = (item.color && HYPE_COLORS[item.color]) || HYPE_DEFAULT;
+            return (
+              <div
+                key={i}
+                className={cn(
+                  "flex items-center gap-3 rounded-xl border bg-gradient-to-r to-transparent p-3",
+                  c.border,
+                  c.bg,
+                )}
+              >
+                <div className={cn("h-2 w-2 rounded-full animate-pulse", c.dot)} />
+                <span className={cn("font-display text-lg font-medium", c.text)}>
+                  {item.text}
+                </span>
+              </div>
+            );
+          })
         )}
       </div>
     </div>

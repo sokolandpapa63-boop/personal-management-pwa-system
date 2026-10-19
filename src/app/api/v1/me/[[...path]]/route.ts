@@ -93,36 +93,57 @@ async function patchSettings(userId: string, body: Record<string, unknown>) {
   const patch: Record<string, unknown> = {};
   const bools = ["notifyTask", "notifyEvent", "notifyPomodoro", "notifyReport", "notifySession"];
   const ints = ["weeklyReportDay", "monthlyReportDay", "pomodoroWork", "pomodoroShortBreak", "pomodoroLongBreak", "pomodoroCycles", "leadTimeMinutes"];
+
+  // Допустимые цвета для строк гиперфокуса — только из палитры дизайн-системы.
+  const ALLOWED_HYPE_COLORS = new Set([
+    "cyan", "indigo", "emerald", "amber", "rose", "violet", "slate",
+  ]);
+
   for (const key of settingsFields) {
     if (body[key] === undefined) continue;
+
     if (key === "hyperfocusPlan") {
-      // Ожидаем объект вида { "1": ["...", "..."], "0": [...] }
-      // Валидируем: каждая запись — массив строк (максимум 20 строк по 200 символов)
       const raw = body[key];
       if (raw === null) {
         patch.hyperfocusPlan = {};
         continue;
       }
       if (typeof raw !== "object" || Array.isArray(raw)) continue;
-      const clean: Record<string, string[]> = {};
+
+      // Поддерживаем оба формата: старый string[] и новый { text, color }[].
+      const clean: Record<string, { text: string; color?: string }[]> = {};
       for (const [day, list] of Object.entries(raw as Record<string, unknown>)) {
         if (!/^[0-6]$/.test(day)) continue;
         if (!Array.isArray(list)) continue;
-        const strings = list
-          .filter((x): x is string => typeof x === "string")
-          .map((s) => s.trim())
-          .filter(Boolean)
-          .slice(0, 20)
-          .map((s) => s.slice(0, 200));
-        clean[day] = strings;
+
+        const items: { text: string; color?: string }[] = [];
+        for (const item of list.slice(0, 20)) {
+          if (typeof item === "string") {
+            const text = item.trim().slice(0, 200);
+            if (text) items.push({ text });
+            continue;
+          }
+          if (!item || typeof item !== "object") continue;
+          const obj = item as Record<string, unknown>;
+          const text = typeof obj.text === "string" ? obj.text.trim().slice(0, 200) : "";
+          if (!text) continue;
+          const color =
+            typeof obj.color === "string" && ALLOWED_HYPE_COLORS.has(obj.color)
+              ? obj.color
+              : undefined;
+          items.push(color ? { text, color } : { text });
+        }
+        clean[day] = items;
       }
       patch.hyperfocusPlan = clean;
       continue;
     }
+
     if (bools.includes(key)) patch[key] = boolOr(body[key], true);
     else if (ints.includes(key)) patch[key] = intOr(body[key], 0);
     else patch[key] = str(body[key]).slice(0, 40);
   }
+
   if (patch.baseCurrency && !["USD", "USDT"].includes(String(patch.baseCurrency))) {
     return fail(400, "validation", "Базовая валюта: USD или USDT");
   }
