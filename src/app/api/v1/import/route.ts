@@ -51,7 +51,7 @@ export async function POST(req: NextRequest) {
         missing.map((name) => ({
           userId,
           name,
-          kind: "table",
+          kind: "container",
         }))
       ).returning();
       created.forEach((s) => sectionMap.set(s.name, s.id));

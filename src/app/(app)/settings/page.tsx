@@ -7,6 +7,7 @@ import { toast } from "@/lib/client/stores";
 import { useSettings, useStudySession, type Settings } from "@/lib/client/hooks";
 import { Button, Card, Field, Input, Select, Switch } from "@/components/ui";
 import { useAuthStore } from "@/lib/client/stores";
+import { HyperfocusSettings } from "@/components/hyperfocus-settings";
 
 function SettingsBlock<S extends object>({
   title,
@@ -78,6 +79,18 @@ export default function SettingsPage() {
       </div>
 
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        {/* БЛОК ГИПЕРФОКУСА (Вставлен первым) */}
+        <div className="lg:col-span-2">
+          <Card>
+            <h2 className="text-sm font-bold text-slate-200">Гиперфокус дня</h2>
+            <p className="mb-4 text-xs text-slate-500">
+              Задайте главные задачи на каждый день недели. Они будут выводиться в виджете на дашборде.
+            </p>
+            <HyperfocusSettings />
+          </Card>
+        </div>
+        {/* КОНЕЦ БЛОКА ГИПЕРФОКУСА */}
+
         <SettingsBlock
           title="Валюты"
           description="Базовая валюта — все агрегаты и отчёты приводятся к ней"

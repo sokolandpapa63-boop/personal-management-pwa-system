@@ -1,8 +1,9 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { Eye, EyeOff, GripVertical, Settings2 } from "lucide-react";
+import { Eye, EyeOff, GripVertical, Settings2, Maximize2 } from "lucide-react";
 import { PomodoroWidget } from "@/components/pomodoro";
+import { HyperfocusWidget } from "@/components/hyperfocus-widget";
 import {
   CurrencyWidget, StatsWidget, StudySessionWidget, TasksTodayWidget, UpcomingEventsWidget,
 } from "@/components/widgets";
@@ -13,6 +14,7 @@ import { useAuthStore } from "@/lib/client/stores";
 import { TZ } from "@/lib/client/hooks";
 
 const WIDGETS = [
+  { id: "hyperfocus", name: "Гиперфокус дня", span: "lg:col-span-12 md:col-span-2", el: <HyperfocusWidget /> },
   { id: "pomodoro", name: "Pomodoro", span: "lg:col-span-4 lg:row-span-2", el: <PomodoroWidget /> },
   { id: "tasks", name: "Задачи на сегодня", span: "lg:col-span-4", el: <TasksTodayWidget /> },
   { id: "events", name: "Ближайшие события", span: "lg:col-span-4", el: <UpcomingEventsWidget /> },
@@ -21,26 +23,36 @@ const WIDGETS = [
   { id: "stats", name: "Статистика разделов", span: "lg:col-span-8", el: <StatsWidget /> },
 ];
 
-const LS_KEY = "ms-dashboard-v1";
+const LS_KEY = "ms-dashboard-v2";
 
-type Prefs = { order: string[]; hidden: string[] };
+type Prefs = { order: string[]; hidden: string[]; sizes: Record<string, string> };
+
+const DEFAULT_SIZES: Record<string, string> = {
+  hyperfocus: "lg:col-span-12 md:col-span-2",
+  pomodoro: "lg:col-span-4 lg:row-span-2",
+  tasks: "lg:col-span-4",
+  events: "lg:col-span-4",
+  session: "lg:col-span-4",
+  currency: "lg:col-span-4",
+  stats: "lg:col-span-8",
+};
 
 function loadPrefs(): Prefs {
-  if (typeof window === "undefined") return { order: WIDGETS.map((w) => w.id), hidden: [] };
+  if (typeof window === "undefined") return { order: WIDGETS.map((w) => w.id), hidden: [], sizes: DEFAULT_SIZES };
   try {
     const raw = localStorage.getItem(LS_KEY);
     if (raw) {
       const p = JSON.parse(raw) as Prefs;
       const order = [...p.order.filter((id) => WIDGETS.some((w) => w.id === id)), ...WIDGETS.filter((w) => !p.order.includes(w.id)).map((w) => w.id)];
-      return { order, hidden: p.hidden ?? [] };
+      return { order, hidden: p.hidden ?? [], sizes: { ...DEFAULT_SIZES, ...(p.sizes ?? {}) } };
     }
   } catch { /* noop */ }
-  return { order: WIDGETS.map((w) => w.id), hidden: [] };
+  return { order: WIDGETS.map((w) => w.id), hidden: [], sizes: DEFAULT_SIZES };
 }
 
 export default function DashboardPage() {
   const user = useAuthStore((s) => s.user);
-  const [prefs, setPrefs] = useState<Prefs>({ order: WIDGETS.map((w) => w.id), hidden: [] });
+  const [prefs, setPrefs] = useState<Prefs>({ order: WIDGETS.map((w) => w.id), hidden: [], sizes: DEFAULT_SIZES });
   const [dragId, setDragId] = useState<string | null>(null);
   const [overId, setOverId] = useState<string | null>(null);
   const [configOpen, setConfigOpen] = useState(false);
@@ -75,6 +87,17 @@ export default function DashboardPage() {
 
   const toggleHidden = (id: string) =>
     setPrefs((p) => ({ ...p, hidden: p.hidden.includes(id) ? p.hidden.filter((x) => x !== id) : [...p.hidden, id] }));
+
+  const toggleSize = (id: string) => {
+    setPrefs((p) => {
+      const current = p.sizes[id] || DEFAULT_SIZES[id] || "lg:col-span-4";
+      // Переключаем между "на всю ширину" (12) и "стандартным" (4 или 8)
+      const next = current.includes("col-span-12") 
+        ? (DEFAULT_SIZES[id] || "lg:col-span-4") 
+        : "lg:col-span-12 md:col-span-2";
+      return { ...p, sizes: { ...p.sizes, [id]: next } };
+    });
+  };
 
   return (
     <div className="space-y-5">
@@ -118,6 +141,8 @@ export default function DashboardPage() {
         {prefs.order.map((id, idx) => {
           const w = WIDGETS.find((x) => x.id === id)!;
           if (prefs.hidden.includes(id)) return null;
+          const sizeClass = prefs.sizes[id] || w.span || "lg:col-span-4";
+          
           return (
             <div
               key={id}
@@ -143,14 +168,21 @@ export default function DashboardPage() {
                 setOverId(null);
               }}
               className={cn(
-                "widget glass group relative rounded-2xl p-5 md:col-span-1",
-                w.span,
+                "widget glass group relative rounded-2xl p-5 md:col-span-1 transition-all duration-300",
+                sizeClass,
                 dragId === id && "dragging",
                 overId === id && dragId !== id && "drag-over",
               )}
             >
-              <div className="absolute right-3 top-3 cursor-grab text-slate-700 opacity-0 transition group-hover:opacity-100">
-                <GripVertical size={15} />
+              <div className="absolute right-3 top-3 flex items-center gap-1 opacity-0 transition group-hover:opacity-100 z-10">
+                <button
+                  onClick={(e) => { e.stopPropagation(); toggleSize(id); }}
+                  className="cursor-pointer rounded-md p-1.5 text-slate-500 hover:bg-slate-700/50 hover:text-cyan-300"
+                  title="Изменить размер"
+                >
+                  <Maximize2 size={14} />
+                </button>
+                <div className="cursor-grab text-slate-700"><GripVertical size={15} /></div>
               </div>
               {w.el}
             </div>

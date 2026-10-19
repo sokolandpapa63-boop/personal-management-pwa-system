@@ -5,7 +5,7 @@ import Link from "next/link";
 import { useMutation, useQueries, useQueryClient } from "@tanstack/react-query";
 import { Bar, BarChart, ResponsiveContainer } from "recharts";
 import {
-  ArrowRight, CalendarDays, CheckCircle2, Circle, Clock, FileText, GraduationCap, RefreshCw, TrendingDown, TrendingUp,
+  ArrowRight, CalendarDays, CheckCircle2, Circle, Clock, FileText, GraduationCap, RefreshCw, Target, TrendingDown, TrendingUp,
 } from "lucide-react";
 import { api } from "@/lib/client/api";
 import { toast } from "@/lib/client/stores";
@@ -20,6 +20,51 @@ function WidgetHeader({ title, action }: { title: string; action?: React.ReactNo
     <div className="mb-3 flex items-center justify-between gap-2">
       <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-slate-500">{title}</p>
       {action}
+    </div>
+  );
+}
+
+// ── Гиперфокус дня ──────────────────────────────────────────────────────────
+const DAYS_RU = ["Воскресенье", "Понедельник", "Вторник", "Среда", "Четверг", "Пятница", "Суббота"];
+
+export function HyperfocusWidget() {
+  const settings = useSettings().data;
+  const today = new Date().getDay(); // 0 (Вс) - 6 (Сб)
+  
+  const plan = settings?.hyperfocusPlan || {};
+  const todayTasks = plan[today.toString()] || [];
+
+  return (
+    <div className="flex h-full flex-col justify-between">
+      <div className="mb-3 flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Target size={18} className="text-cyan-400" />
+          <p className="font-display text-sm font-semibold tracking-wide text-slate-100">
+            ГИПЕРФОКУС ДНЯ
+          </p>
+        </div>
+        <span className="rounded-full bg-cyan-400/10 px-2.5 py-1 text-[10px] font-bold uppercase tracking-wider text-cyan-300">
+          {DAYS_RU[today]}
+        </span>
+      </div>
+
+      <div className="flex flex-1 flex-col justify-center gap-2">
+        {todayTasks.length === 0 ? (
+          <p className="text-center text-sm text-slate-500 italic">
+            На сегодня фокус не задан. Настройте его в меню.
+          </p>
+        ) : (
+          todayTasks.map((text, i) => (
+            <div 
+              key={i} 
+              className="flex items-center gap-3 rounded-xl border border-cyan-500/20 bg-gradient-to-r from-cyan-500/10 to-transparent p-3"
+            >
+              <div className="h-2 w-2 rounded-full bg-cyan-400 animate-pulse" />
+              <span className="font-display text-lg font-medium text-slate-50">{text}</span>
+            </div>
+          ))
+        )}
+      </div>
     </div>
   );
 }

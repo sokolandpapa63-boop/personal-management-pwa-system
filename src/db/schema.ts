@@ -59,6 +59,7 @@ export const userSettings = pgTable("user_settings", {
   notifyReport: boolean("notify_report").notNull().default(true),
   notifySession: boolean("notify_session").notNull().default(true),
   leadTimeMinutes: integer("lead_time_minutes").notNull().default(10),
+  hyperfocusPlan: jsonb("hyperfocus_plan").$type<Record<string, string[]>>().default({}),
 });
 
 export const sections = pgTable(
