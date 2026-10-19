@@ -3,9 +3,8 @@
 import { useEffect, useMemo, useState } from "react";
 import { Eye, EyeOff, GripVertical, Settings2, Maximize2 } from "lucide-react";
 import { PomodoroWidget } from "@/components/pomodoro";
-import { HyperfocusWidget } from "@/components/hyperfocus-widget";
 import {
-  CurrencyWidget, StatsWidget, StudySessionWidget, TasksTodayWidget, UpcomingEventsWidget,
+  CurrencyWidget, StatsWidget, StudySessionWidget, TasksTodayWidget, UpcomingEventsWidget, HyperfocusWidget,
 } from "@/components/widgets";
 import { ReportDialog } from "@/components/report-dialog";
 import { ReportTriggerButton } from "@/components/widgets";
