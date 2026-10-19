@@ -12,6 +12,7 @@ import {
 } from "@/lib/client/hooks";
 import { Badge, Button, cn, EmptyState, Input, ReasonDialog, Select } from "@/components/ui";
 import { DuplicateDialog, TaskDialog } from "@/components/task-dialog";
+import { ImportCsvWidget } from "@/components/import-csv";
 
 type StatusFilter = "active" | "completed" | "cancelled" | "all";
 
@@ -234,6 +235,15 @@ export default function TasksPage() {
         danger
         onSubmit={(reason) => deleteTask && reasonAction.mutate({ id: deleteTask.id, reason, mode: "delete" })}
       />
+
+      {/* Массовый импорт */}
+       <div className="glass mt-6 rounded-2xl p-5">
+         <div className="mb-4">
+           <h3 className="font-display text-lg font-semibold text-slate-50">Массовый импорт из CSV</h3>
+          <p className="text-xs text-slate-500">Загрузите файл — задачи и события создадутся автоматически</p>
+        </div>
+        <ImportCsvWidget />
+      </div>
     </div>
   );
 }
