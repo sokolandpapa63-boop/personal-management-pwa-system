@@ -36,6 +36,15 @@ const DEFAULT_SIZES: Record<string, string> = {
   stats: "lg:col-span-8",
 };
 
+/** Доступные варианты ширины виджета (lg-брейкпоинт, 12-колоночная сетка). */
+const SIZE_OPTIONS: { label: string; cls: string }[] = [
+  { label: "1/4 ширины", cls: "lg:col-span-3" },
+  { label: "1/3 ширины", cls: "lg:col-span-4" },
+  { label: "1/2 ширины", cls: "lg:col-span-6" },
+  { label: "2/3 ширины", cls: "lg:col-span-8" },
+  { label: "На всю ширину", cls: "lg:col-span-12 md:col-span-2" },
+];
+
 function loadPrefs(): Prefs {
   if (typeof window === "undefined") return { order: WIDGETS.map((w) => w.id), hidden: [], sizes: DEFAULT_SIZES };
   try {
@@ -56,6 +65,7 @@ export default function DashboardPage() {
   const [overId, setOverId] = useState<string | null>(null);
   const [configOpen, setConfigOpen] = useState(false);
   const [reportOpen, setReportOpen] = useState(false);
+  const [sizeMenu, setSizeMenu] = useState<string | null>(null);
 
   useEffect(() => setPrefs(loadPrefs()), []);
   useEffect(() => {
@@ -87,15 +97,9 @@ export default function DashboardPage() {
   const toggleHidden = (id: string) =>
     setPrefs((p) => ({ ...p, hidden: p.hidden.includes(id) ? p.hidden.filter((x) => x !== id) : [...p.hidden, id] }));
 
-  const toggleSize = (id: string) => {
-    setPrefs((p) => {
-      const current = p.sizes[id] || DEFAULT_SIZES[id] || "lg:col-span-4";
-      // Переключаем между "на всю ширину" (12) и "стандартным" (4 или 8)
-      const next = current.includes("col-span-12") 
-        ? (DEFAULT_SIZES[id] || "lg:col-span-4") 
-        : "lg:col-span-12 md:col-span-2";
-      return { ...p, sizes: { ...p.sizes, [id]: next } };
-    });
+  /** Установить конкретный размер виджета. */
+  const setSize = (id: string, sizeClass: string) => {
+    setPrefs((p) => ({ ...p, sizes: { ...p.sizes, [id]: sizeClass } }));
   };
 
   return (
@@ -141,7 +145,8 @@ export default function DashboardPage() {
           const w = WIDGETS.find((x) => x.id === id)!;
           if (prefs.hidden.includes(id)) return null;
           const sizeClass = prefs.sizes[id] || w.span || "lg:col-span-4";
-          
+          const isSizeMenuOpen = sizeMenu === id;
+
           return (
             <div
               key={id}
@@ -173,15 +178,50 @@ export default function DashboardPage() {
                 overId === id && dragId !== id && "drag-over",
               )}
             >
-              <div className="absolute right-3 top-3 flex items-center gap-1 opacity-0 transition group-hover:opacity-100 z-10">
-                <button
-                  onClick={(e) => { e.stopPropagation(); toggleSize(id); }}
-                  className="cursor-pointer rounded-md p-1.5 text-slate-500 hover:bg-slate-700/50 hover:text-cyan-300"
-                  title="Изменить размер"
-                >
-                  <Maximize2 size={14} />
-                </button>
-                <div className="cursor-grab text-slate-700"><GripVertical size={15} /></div>
+              <div className="absolute right-3 top-3 z-10 flex items-center gap-1 opacity-0 transition group-hover:opacity-100">
+                <div className="relative">
+                  <button
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      setSizeMenu(isSizeMenuOpen ? null : id);
+                    }}
+                    className="cursor-pointer rounded-md p-1.5 text-slate-500 hover:bg-slate-700/50 hover:text-cyan-300"
+                    title="Размер виджета"
+                  >
+                    <Maximize2 size={14} />
+                  </button>
+                  {isSizeMenuOpen && (
+                    <>
+                      <div
+                        className="fixed inset-0 z-20"
+                        onClick={() => setSizeMenu(null)}
+                      />
+                      <div className="glass-strong absolute right-0 top-8 z-30 w-40 rounded-lg p-1">
+                        {SIZE_OPTIONS.map((opt) => (
+                          <button
+                            key={opt.cls}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSize(id, opt.cls);
+                              setSizeMenu(null);
+                            }}
+                            className={cn(
+                              "block w-full rounded px-2 py-1.5 text-left text-xs transition",
+                              sizeClass === opt.cls
+                                ? "bg-cyan-500/20 text-cyan-200"
+                                : "text-slate-400 hover:bg-slate-800/60 hover:text-slate-200",
+                            )}
+                          >
+                            {opt.label}
+                          </button>
+                        ))}
+                      </div>
+                    </>
+                  )}
+                </div>
+                <div className="cursor-grab text-slate-700">
+                  <GripVertical size={15} />
+                </div>
               </div>
               {w.el}
             </div>

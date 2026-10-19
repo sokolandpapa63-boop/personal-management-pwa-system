@@ -85,7 +85,7 @@ const settingsFields = [
   "theme", "baseCurrency", "displayCurrency", "dailyReportTime",
   "weeklyReportDay", "monthlyReportDay", "pomodoroWork", "pomodoroShortBreak",
   "pomodoroLongBreak", "pomodoroCycles", "notifyTask", "notifyEvent", "notifyPomodoro",
-  "notifyReport", "notifySession", "leadTimeMinutes",
+  "notifyReport", "notifySession", "leadTimeMinutes", "hyperfocusPlan",
 ] as const;
 
 async function patchSettings(userId: string, body: Record<string, unknown>) {
@@ -95,6 +95,30 @@ async function patchSettings(userId: string, body: Record<string, unknown>) {
   const ints = ["weeklyReportDay", "monthlyReportDay", "pomodoroWork", "pomodoroShortBreak", "pomodoroLongBreak", "pomodoroCycles", "leadTimeMinutes"];
   for (const key of settingsFields) {
     if (body[key] === undefined) continue;
+    if (key === "hyperfocusPlan") {
+      // Ожидаем объект вида { "1": ["...", "..."], "0": [...] }
+      // Валидируем: каждая запись — массив строк (максимум 20 строк по 200 символов)
+      const raw = body[key];
+      if (raw === null) {
+        patch.hyperfocusPlan = {};
+        continue;
+      }
+      if (typeof raw !== "object" || Array.isArray(raw)) continue;
+      const clean: Record<string, string[]> = {};
+      for (const [day, list] of Object.entries(raw as Record<string, unknown>)) {
+        if (!/^[0-6]$/.test(day)) continue;
+        if (!Array.isArray(list)) continue;
+        const strings = list
+          .filter((x): x is string => typeof x === "string")
+          .map((s) => s.trim())
+          .filter(Boolean)
+          .slice(0, 20)
+          .map((s) => s.slice(0, 200));
+        clean[day] = strings;
+      }
+      patch.hyperfocusPlan = clean;
+      continue;
+    }
     if (bools.includes(key)) patch[key] = boolOr(body[key], true);
     else if (ints.includes(key)) patch[key] = intOr(body[key], 0);
     else patch[key] = str(body[key]).slice(0, 40);
