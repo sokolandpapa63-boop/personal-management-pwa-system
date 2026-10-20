@@ -175,7 +175,7 @@ export function TasksTodayWidget() {
 
 // ── Ближайшие события ───────────────────────────────────────────────────────
 export function UpcomingEventsWidget() {
-  const from = new Date().toISOString();
+  const from = `${todayKey()}T00:00:00+03:00`;
   const to = `${addDaysKey(todayKey(), 7)}T23:59:59+03:00`;
   const events = useEvents(from, to).data ?? [];
   const tasks = useTasks({ status: "active", from, to }).data ?? [];
