@@ -113,7 +113,8 @@ function NavTree({ sections, pathname, onNavigate }: { sections: Section[]; path
       {link(`/sections/${sec.id}`, sec.name, <SectionIcon icon={sec.icon} />, depth)}
     </div>
   );
-}
+  }
+ }
 
 function NewSectionDialog({ open, onClose, sections }: { open: boolean; onClose: () => void; sections: Section[] }) {
   const queryClient = useQueryClient();
