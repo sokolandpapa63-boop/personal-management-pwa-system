@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { and, asc, eq, gte, inArray, lte } from "drizzle-orm";
+import { and, asc, eq, gte, lte } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import {
@@ -273,11 +273,16 @@ async function summary(req: NextRequest, userId: string) {
     pnl: number;
   }[] = [];
 
-  // Кэшируем схемы подразделов — через inArray (корректно для uuid[])
-  const sectionIds = children.map((c) => c.id);
-  const schemaRows = sectionIds.length
-    ? await db.select().from(tableSchemas).where(inArray(tableSchemas.sectionId, sectionIds))
-    : [];
+  // Схемы подразделов — по одному запросу на каждый (гарантированно без ANY/inArray).
+  const schemaRows: (typeof tableSchemas.$inferSelect)[] = [];
+  for (const child of children) {
+    const rows = await db
+      .select()
+      .from(tableSchemas)
+      .where(eq(tableSchemas.sectionId, child.id))
+      .limit(1);
+    if (rows[0]) schemaRows.push(rows[0]);
+  }
   const schemaBySection = new Map(
     schemaRows.map((s) => [s.sectionId, s.columns as unknown as Column[]]),
   );
@@ -310,7 +315,7 @@ async function summary(req: NextRequest, userId: string) {
       const d = r.data as Record<string, unknown>;
       const op = String(d.operation ?? "");
       const amountBase =
-        r.amountBase != null
+        r.amountBase != null && !Number.isNaN(Number(r.amountBase))
           ? Number(r.amountBase)
           : convertWith(rates, Number(d.amount) || 0, dep, base) ?? 0;
       if (op === "Доход") {
