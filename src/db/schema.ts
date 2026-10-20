@@ -59,7 +59,7 @@ export const userSettings = pgTable("user_settings", {
   notifyReport: boolean("notify_report").notNull().default(true),
   notifySession: boolean("notify_session").notNull().default(true),
   leadTimeMinutes: integer("lead_time_minutes").notNull().default(10),
-  hyperfocusPlan: jsonb("hyperfocus_plan").$type<Record<string, string[]>>().default({}),
+  hyperfocusPlan: jsonb("hyperfocus_plan").$type<Record<string, unknown>>().default({}),
 });
 
 export const sections = pgTable(
@@ -237,7 +237,32 @@ export const pushTokens = pgTable(
   (t) => [index("push_tokens_user_idx").on(t.userId)],
 );
 
+// ── Бюджет: погашения кредитов / обязательства ───────────────────────────────
+export const creditPayments = pgTable(
+  "credit_payments",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    userId: uuid("user_id")
+      .notNull()
+      .references(() => users.id, { onDelete: "cascade" }),
+    bank: text("bank").notNull(),
+    logoUrl: text("logo_url"),
+    amount: numeric("amount", { precision: 20, scale: 2 }).notNull(),
+    currency: text("currency").notNull().default("RUB"),
+    dueAt: timestamp("due_at", { withTimezone: true }).notNull(),
+    note: text("note"),
+    isPaid: boolean("is_paid").notNull().default(false),
+    paidAt: timestamp("paid_at", { withTimezone: true }),
+    // повторяемость: {freq: "monthly", interval: 1, until: null}
+    recurrence: jsonb("recurrence"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("credit_payments_user_due_idx").on(t.userId, t.dueAt)],
+);
+
 export type User = typeof users.$inferSelect;
 export type Section = typeof sections.$inferSelect;
 export type Task = typeof tasks.$inferSelect;
 export type AppEvent = typeof events.$inferSelect;
+export type CreditPayment = typeof creditPayments.$inferSelect;

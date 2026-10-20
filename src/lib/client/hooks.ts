@@ -112,6 +112,58 @@ export type ReportRow = {
   summary: { tasksCompleted?: number; pomodoroSessions?: number; focusMinutes?: number } | null;
 };
 
+  // ── Бюджет / Финансы ────────────────────────────────────────────────────────
+export type CreditPayment = {
+  id: string;
+  bank: string;
+  logoUrl: string | null;
+  amount: string;
+  currency: string;
+  dueAt: string;
+  note: string | null;
+  isPaid: boolean;
+  paidAt: string | null;
+  recurrence: { freq: string; interval?: number; until?: string | null } | null;
+};
+
+export type FinanceSummary = {
+  period: { from: string; to: string };
+  baseCurrency: string;
+  pnl: { income: number; expense: number; net: number };
+  bySection: {
+    id: string;
+    name: string;
+    slug: string | null;
+    depositCurrency: string;
+    income: number;
+    expense: number;
+    pnl: number;
+  }[];
+  plan: { category: string; amount: number }[];
+  upcomingPayments: CreditPayment[];
+};
+
+export function useFinanceSummary(from?: string, to?: string) {
+  const qs = new URLSearchParams();
+  if (from) qs.set("from", from);
+  if (to) qs.set("to", to);
+  const query = qs.toString();
+  return useQuery({
+    queryKey: ["finance-summary", from ?? "", to ?? ""],
+    queryFn: () => api<FinanceSummary>(`/finance/summary${query ? `?${query}` : ""}`),
+    staleTime: 60_000,
+  });
+}
+
+export function useCreditPayments() {
+  return useQuery({
+    queryKey: ["credit-payments"],
+    queryFn: () =>
+      api<{ items: CreditPayment[] }>("/finance/payments").then((r) => r.items),
+    staleTime: 30_000,
+  });
+}
+
 // ── Запросы ─────────────────────────────────────────────────────────────────
 export function useSections() {
   return useQuery({

@@ -88,7 +88,6 @@ export function zonedDateStr(tz: string, at = new Date()): string {
 export function dayBoundsUtc(tz: string, y: number, m: number, d: number) {
   const start = zonedToUtc(tz, y, m, d, 0, 0, 0);
   const nxt = new Date(start.getTime() + 86400000);
-  // корректировка на случай перехода DST (в МСК его нет, но поддерживаем)
   const end = zonedToUtc(
     tz,
     ...(() => {
@@ -228,6 +227,7 @@ const SEED: SeedItem[] = [
   { slug: "finance-naim", name: "Найм", kind: "table", icon: "briefcase", color: "#60a5fa", parent: "finance", schema: financeSchema(), depositCurrency: "RUB" },
   { slug: "control", name: "Управление системой", kind: "container", icon: "sliders-horizontal", color: "#e2e8f0" },
   { slug: "reports", name: "Отчёты системы", kind: "container", icon: "file-text", color: "#e2e8f0" },
+  { slug: "budget", name: "Бюджет", kind: "container", icon: "wallet", color: "#34d399", parent: "finance" },
 ];
 
 export async function seedSystemSections(userId: string) {
