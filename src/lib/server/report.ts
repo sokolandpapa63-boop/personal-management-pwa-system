@@ -1,6 +1,7 @@
 import { and, eq, gte, lte, inArray, desc } from "drizzle-orm";
 import { db } from "@/db";
 import {
+  creditPayments,
   events,
   pomodoroSessions,
   reports,
@@ -104,6 +105,60 @@ function svgLineChart(
   return `<svg viewBox="0 0 ${width} ${height}" width="100%" height="${height}" xmlns="http://www.w3.org/2000/svg"><polyline fill="none" stroke="${color}" stroke-width="2" points="${poly}"/>${dots}</svg>`;
 }
 
+/** Круговая диаграмма (SVG) с легендой. */
+function svgPieChart(
+  data: { label: string; value: number; color: string }[],
+  width = 240,
+  height = 240,
+): string {
+  const total = data.reduce((s, d) => s + d.value, 0);
+  if (!total) return "";
+  const cx = width / 2;
+  const cy = height / 2;
+  const r = Math.min(width, height) / 2 - 8;
+  let angle = -Math.PI / 2;
+  const slices = data
+    .filter((d) => d.value > 0)
+    .map((d) => {
+      const frac = d.value / total;
+      const a1 = angle;
+      const a2 = angle + frac * Math.PI * 2;
+      angle = a2;
+      const x1 = cx + r * Math.cos(a1);
+      const y1 = cy + r * Math.sin(a1);
+      const x2 = cx + r * Math.cos(a2);
+      const y2 = cy + r * Math.sin(a2);
+      const large = frac > 0.5 ? 1 : 0;
+      const path = `M ${cx} ${cy} L ${x1.toFixed(1)} ${y1.toFixed(1)} A ${r} ${r} 0 ${large} 1 ${x2.toFixed(1)} ${y2.toFixed(1)} Z`;
+      return `<path d="${path}" fill="${d.color}" stroke="#fff" stroke-width="1.5"><title>${esc(
+        d.label,
+      )}: ${Math.round(frac * 100)}%</title></path>`;
+    })
+    .join("");
+
+  const legend = data
+    .filter((d) => d.value > 0)
+    .map(
+      (d, i) =>
+        `<g transform="translate(0 ${i * 18})"><rect width="10" height="10" rx="2" fill="${d.color}"/><text x="16" y="9" font-size="11" fill="#334155">${esc(
+          d.label,
+        )} — ${Math.round((d.value / total) * 100)}%</text></g>`,
+    )
+    .join("");
+
+  return `
+    <div style="display:flex;gap:20px;align-items:center;flex-wrap:wrap">
+      <svg viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" xmlns="http://www.w3.org/2000/svg">${slices}</svg>
+      <svg viewBox="0 0 220 ${Math.max(data.length, 1) * 18}" width="220" height="${Math.max(
+        data.length,
+        1,
+      ) * 18}" xmlns="http://www.w3.org/2000/svg">${legend}</svg>
+    </div>`;
+}
+
+const POMO_COLORS = ["#22d3ee", "#818cf8", "#34d399", "#f59e0b", "#fb7185", "#a78bfa", "#60a5fa", "#94a3b8"];
+const PLAN_COLORS = ["#34d399", "#22d3ee", "#818cf8", "#f59e0b", "#fb7185", "#a78bfa", "#60a5fa", "#94a3b8"];
+
 type ReportParams = {
   type: string; // daily | weekly | monthly | manual
   from: Date;
@@ -153,6 +208,20 @@ export async function generateReport(userId: string, params: ReportParams) {
     );
   const focusMinutes = poms.reduce((acc, p) => acc + p.duration, 0);
 
+  // Помодоро по разделам — для круговой диаграммы
+  const pomoBySection = new Map<string, number>();
+  for (const p of poms) {
+    const key = p.sectionId ?? "__none__";
+    pomoBySection.set(key, (pomoBySection.get(key) ?? 0) + p.duration);
+  }
+  const pomoChartData = [...pomoBySection.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([sid, minutes], i) => ({
+      label: sid === "__none__" ? "Без раздела" : (byId.get(sid)?.name ?? "Раздел"),
+      value: minutes,
+      color: POMO_COLORS[i % POMO_COLORS.length],
+    }));
+
   // События
   const evs = await db
     .select()
@@ -187,7 +256,11 @@ export async function generateReport(userId: string, params: ReportParams) {
   };
 
   const secRecords = (sid: string) =>
-    recordRows.filter((r) => r.sectionId === sid && inPeriod((r.data as Record<string, string>).date ?? null, r.createdAt));
+    recordRows.filter(
+      (r) =>
+        r.sectionId === sid &&
+        inPeriod((r.data as Record<string, string>).date ?? null, r.createdAt),
+    );
 
   // ── Блоки HTML ──
   const blocks: string[] = [];
@@ -261,64 +334,117 @@ export async function generateReport(userId: string, params: ReportParams) {
     `);
   }
 
-  // Финансы
+  // Финансы (подразделы с operation)
   const finance = bySlug.get("finance");
+  let financeIncome = 0;
+  let financeExpense = 0;
+  const financeBySection: { name: string; income: number; expense: number; pnl: number }[] = [];
+  const planByCategory = new Map<string, number>();
+  const financeDayNet = new Map<string, number>();
+
   if (finance) {
     const children = allSections.filter((s) => s.parentId === finance.id);
-    let totalIncome = 0;
-    let totalExpense = 0;
-    const childBlocks: string[] = [];
-    const dayNet = new Map<string, number>();
     for (const child of children) {
       const recs = secRecords(child.id);
       if (!recs.length) continue;
       const dep = child.depositCurrency ?? "RUB";
+      const cols = schemaBySection.get(child.id) ?? [];
+      const hasOperation = cols.some((c) => c.key === "operation");
+      if (!hasOperation) continue;
       let income = 0;
       let expense = 0;
       for (const r of recs) {
         const d = r.data as Record<string, unknown>;
         const amount = Number(d.amount) || 0;
-        const base = d.amountBase != null ? Number(d.amountBase) : convertWith(rates, amount, dep, baseCurrency) ?? 0;
+        const base =
+          r.amountBase != null && !Number.isNaN(Number(r.amountBase))
+            ? Number(r.amountBase)
+            : convertWith(rates, amount, dep, baseCurrency) ?? 0;
         const day = String(d.date ?? toZonedDateStr(tz, r.createdAt)).slice(5);
         if (d.operation === "Доход") {
           income += base;
-          dayNet.set(day, (dayNet.get(day) ?? 0) + base);
+          financeDayNet.set(day, (financeDayNet.get(day) ?? 0) + base);
         } else if (d.operation === "Расход") {
           expense += base;
-          dayNet.set(day, (dayNet.get(day) ?? 0) - base);
+          financeDayNet.set(day, (financeDayNet.get(day) ?? 0) - base);
+          const cat = String(d.category ?? "Прочее");
+          planByCategory.set(cat, (planByCategory.get(cat) ?? 0) + base);
         }
       }
-      totalIncome += income;
-      totalExpense += expense;
-      childBlocks.push(`
-        <h3>${esc(child.name)} <span class="muted">(депозит: ${dep})</span></h3>
-        <table><thead><tr><th>Дата</th><th>Операция</th><th>Категория</th><th class="r">Сумма</th><th class="r">${esc(baseCurrency)}</th><th>Комментарий</th></tr></thead><tbody>
-        ${recs
-          .map((r) => {
-            const d = r.data as Record<string, unknown>;
-            const base = d.amountBase != null ? Number(d.amountBase) : convertWith(rates, Number(d.amount) || 0, dep, baseCurrency) ?? 0;
-            return `<tr><td>${esc(d.date)}</td><td>${esc(d.operation)}</td><td>${esc(d.category ?? "—")}</td><td class="r">${fmtMoney(Number(d.amount) || 0, dep)}</td><td class="r">${fmtMoney(base)}</td><td>${esc(d.notes ?? "")}</td></tr>`;
-          })
-          .join("")}
-        </tbody></table>
-        <p class="muted">Доход: <b>${fmtMoney(income, baseCurrency)}</b> · Расход: <b>${fmtMoney(expense, baseCurrency)}</b> · Итог: <b>${fmtMoney(
-          income - expense,
-          baseCurrency,
-        )}</b></p>
-      `);
+      financeIncome += income;
+      financeExpense += expense;
+      financeBySection.push({
+        name: child.name,
+        income,
+        expense,
+        pnl: income - expense,
+      });
     }
+  }
+
+  // Погашения кредитов за период
+  const payments = await db
+    .select()
+    .from(creditPayments)
+    .where(
+      and(
+        eq(creditPayments.userId, userId),
+        gte(creditPayments.dueAt, params.from),
+        lte(creditPayments.dueAt, params.to),
+      ),
+    )
+    .orderBy(desc(creditPayments.dueAt))
+    .limit(200);
+
+  // Блок «Финансы · Бюджет»
+  if (finance) {
+    const planData = [...planByCategory.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .map(([label, value], i) => ({
+        label,
+        value,
+        color: PLAN_COLORS[i % PLAN_COLORS.length],
+      }));
+
+    const dayFlow = [...financeDayNet.entries()]
+      .sort((a, b) => a[0].localeCompare(b[0]))
+      .map(([label, value]) => ({ label, value: Math.abs(value) }));
+
+    const paymentsHtml = payments.length
+      ? `<table><thead><tr><th>Банк</th><th>Сумма</th><th>Дата</th><th>Статус</th></tr></thead><tbody>${payments
+          .map((p) => {
+            const overdue = !p.isPaid && p.dueAt < new Date();
+            const status = p.isPaid
+              ? '<span style="color:#059669">оплачено</span>'
+              : overdue
+                ? '<span style="color:#dc2626">просрочено</span>'
+                : '<span style="color:#d97706">ожидает</span>';
+            return `<tr><td>${esc(p.bank)}</td><td class="r">${fmtMoney(Number(p.amount), p.currency)}</td><td>${fmtDateRu(p.dueAt, tz)}</td><td>${status}</td></tr>`;
+          })
+          .join("")}</tbody></table>`
+      : '<p class="muted">Погашений за период нет.</p>';
+
     blocks.push(`
-      <h2>Финансы</h2>
+      <h2>Финансы · Бюджет</h2>
       <div class="cards">
-        <div class="card"><div class="num green">+${fmtMoney(totalIncome)}</div><div class="lbl">доход, ${esc(baseCurrency)}</div></div>
-        <div class="card"><div class="num red">−${fmtMoney(totalExpense)}</div><div class="lbl">расход, ${esc(baseCurrency)}</div></div>
-        <div class="card"><div class="num">${fmtMoney(totalIncome - totalExpense)}</div><div class="lbl">итог, ${esc(baseCurrency)}</div></div>
+        <div class="card"><div class="num green">+${fmtMoney(financeIncome, baseCurrency)}</div><div class="lbl">доходы, ${esc(baseCurrency)}</div></div>
+        <div class="card"><div class="num red">−${fmtMoney(financeExpense, baseCurrency)}</div><div class="lbl">расходы, ${esc(baseCurrency)}</div></div>
+        <div class="card"><div class="num">${fmtMoney(financeIncome - financeExpense, baseCurrency)}</div><div class="lbl">PnL, ${esc(baseCurrency)}</div></div>
       </div>
-      ${dayNet.size ? `<h3>Денежный поток по дням (${esc(baseCurrency)})</h3>${svgBarChart(
-        [...dayNet.entries()].sort((a, b) => a[0].localeCompare(b[0])).map(([label, value]) => ({ label, value: Math.abs(value) })),
-        "#34d399",
-      )}` : ""}
-      ${childBlocks.join("")}
+      ${
+        financeBySection.length
+          ? `<h3>PnL по подразделам</h3><table><thead><tr><th>Подраздел</th><th class="r">Доход</th><th class="r">Расход</th><th class="r">PnL</th></tr></thead><tbody>${financeBySection
+              .map(
+                (s) =>
+                  `<tr><td>${esc(s.name)}</td><td class="r">${fmtMoney(s.income)}</td><td class="r">${fmtMoney(s.expense)}</td><td class="r">${fmtMoney(s.pnl)}</td></tr>`,
+              )
+              .join("")}</tbody></table>`
+          : ""
+      }
+      ${planData.length ? `<h3>План бюджета по категориям</h3>${svgPieChart(planData)}` : ""}
+      ${dayFlow.length ? `<h3>Денежный поток по дням</h3>${svgBarChart(dayFlow, "#34d399")}` : ""}
+      <h3>Погашения кредитов</h3>
+      ${paymentsHtml}
     `);
   }
 
@@ -385,6 +511,7 @@ export async function generateReport(userId: string, params: ReportParams) {
       "минуты",
       "минут",
     )} · Событий в календаре: <b>${evs.length}</b></p>
+    ${pomoChartData.length ? `<h3>Распределение фокуса по разделам</h3>${svgPieChart(pomoChartData)}` : ""}
   `);
 
   const typeName: Record<string, string> = {
@@ -457,6 +584,10 @@ export async function generateReport(userId: string, params: ReportParams) {
           tasksOverdue: overdueTasks.length,
           pomodoroSessions: poms.length,
           focusMinutes,
+          financeIncome: Math.round(financeIncome * 100) / 100,
+          financeExpense: Math.round(financeExpense * 100) / 100,
+          financeNet: Math.round((financeIncome - financeExpense) * 100) / 100,
+          creditPayments: payments.length,
         },
       },
     })

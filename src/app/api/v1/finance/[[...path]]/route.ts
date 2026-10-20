@@ -273,7 +273,7 @@ async function summary(req: NextRequest, userId: string) {
     pnl: number;
   }[] = [];
 
-  // Схемы подразделов — по одному запросу на каждый (гарантированно без ANY/inArray).
+  // Схемы подразделов — по одному запросу на каждый
   const schemaRows: (typeof tableSchemas.$inferSelect)[] = [];
   for (const child of children) {
     const rows = await db

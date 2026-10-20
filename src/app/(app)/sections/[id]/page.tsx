@@ -11,6 +11,7 @@ import { useSections, type Section } from "@/lib/client/hooks";
 import { Button, Dialog, Field, Input, Select, Spinner, EmptyState } from "@/components/ui";
 import { DataTable } from "@/components/data-table";
 import { StudySessionWidget } from "@/components/widgets";
+import { BudgetLayout } from "@/components/budget-layout";
 
 const COLORS = ["#22d3ee", "#a78bfa", "#34d399", "#f59e0b", "#fb7185", "#60a5fa", "#e2e8f0"];
 const ICONS = ["dumbbell", "graduation-cap", "wallet", "landmark", "briefcase", "sparkles", "file-text", "sliders-horizontal"];
@@ -99,6 +100,28 @@ export default function SectionPage() {
       setDeleting(false);
     }
   };
+
+  // ── Бюджет: дашборд с вкладками ──────────────────────────────────────────
+  if (section.slug === "budget") {
+    return (
+      <div className="space-y-5">
+        <div className="flex flex-wrap items-center gap-3">
+          <span
+            className="h-9 w-1.5 rounded-full"
+            style={{
+              background: section.color ?? "#34d399",
+              boxShadow: `0 0 16px ${section.color ?? "#34d399"}66`,
+            }}
+          />
+          <div className="flex-1">
+            <h1 className="font-display text-xl font-semibold text-slate-50">{section.name}</h1>
+            <p className="text-xs text-slate-500">финансовый обзор · бюджет · кредиты</p>
+          </div>
+        </div>
+        <BudgetLayout section={section} />
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-5">
