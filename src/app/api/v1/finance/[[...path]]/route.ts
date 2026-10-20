@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { and, asc, desc, eq, gte, lte, sql } from "drizzle-orm";
+import { and, asc, eq, gte, inArray, lte } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db";
 import {
@@ -9,7 +9,7 @@ import {
   tableSchemas,
   userSettings,
 } from "@/db/schema";
-import { dateOr, fail, ok, readBody, requireUser, str, num, boolOr } from "@/lib/server/http";
+import { dateOr, fail, ok, readBody, requireUser } from "@/lib/server/http";
 import { emit } from "@/lib/server/bus";
 import { isUuid } from "@/lib/server/records";
 import { DEFAULT_TZ, type Column } from "@/lib/server/core";
@@ -29,7 +29,6 @@ async function getBaseCurrency(userId: string): Promise<string> {
 }
 
 async function getFinanceTree(userId: string) {
-  // Корневой раздел «Финансы» и его подразделы
   const rows = await db.select().from(sections).where(eq(sections.userId, userId));
   const finance = rows.find((s) => s.slug === "finance");
   const children = finance ? rows.filter((s) => s.parentId === finance.id) : [];
@@ -57,12 +56,8 @@ export async function GET(req: NextRequest) {
   if (userId instanceof NextResponse) return userId;
   const parts = req.nextUrl.pathname.replace(/^\/api\/v1\/finance\/?/, "").split("/").filter(Boolean);
 
-  // GET /finance/summary?from=&to=
-  if (parts[0] === "summary") {
-    return summary(req, userId);
-  }
+  if (parts[0] === "summary") return summary(req, userId);
 
-  // GET /finance/payments
   if (parts[0] === "payments" && parts.length === 1) {
     const rows = await db
       .select()
@@ -73,7 +68,6 @@ export async function GET(req: NextRequest) {
     return ok({ items: rows.map(serializePayment) });
   }
 
-  // GET /finance/payments/:id
   if (parts[0] === "payments" && parts[1] && isUuid(parts[1])) {
     const rows = await db
       .select()
@@ -178,7 +172,6 @@ export async function POST(req: NextRequest) {
   if (userId instanceof NextResponse) return userId;
   const parts = req.nextUrl.pathname.replace(/^\/api\/v1\/finance\/?/, "").split("/").filter(Boolean);
 
-  // POST /finance/payments
   if (parts[0] === "payments" && parts.length === 1) {
     const parsed = paymentCreateSchema.safeParse(await readBody(req));
     if (!parsed.success) {
@@ -203,7 +196,6 @@ export async function POST(req: NextRequest) {
     return ok({ item: serializePayment(row) }, { status: 201 });
   }
 
-  // POST /finance/payments/:id/pay — отметить оплаченным + (опц.) создать повтор
   if (parts[0] === "payments" && parts[1] && parts[2] === "pay" && isUuid(parts[1])) {
     const rows = await db
       .select()
@@ -271,7 +263,6 @@ async function summary(req: NextRequest, userId: string) {
 
   const { rates } = await getRates();
 
-  // Для каждого подраздела — считаем доходы/расходы по табличным записям
   const bySection: {
     id: string;
     name: string;
@@ -282,10 +273,10 @@ async function summary(req: NextRequest, userId: string) {
     pnl: number;
   }[] = [];
 
-  // Кэшируем схемы подразделов, чтобы понять, есть ли поле "operation"
+  // Кэшируем схемы подразделов — через inArray (корректно для uuid[])
   const sectionIds = children.map((c) => c.id);
   const schemaRows = sectionIds.length
-    ? await db.select().from(tableSchemas).where(sql`${tableSchemas.sectionId} = ANY(${sectionIds})`)
+    ? await db.select().from(tableSchemas).where(inArray(tableSchemas.sectionId, sectionIds))
     : [];
   const schemaBySection = new Map(
     schemaRows.map((s) => [s.sectionId, s.columns as unknown as Column[]]),
@@ -318,7 +309,6 @@ async function summary(req: NextRequest, userId: string) {
     for (const r of records) {
       const d = r.data as Record<string, unknown>;
       const op = String(d.operation ?? "");
-      // amountBase уже пересчитан в базовую валюту; иначе конвертируем amount
       const amountBase =
         r.amountBase != null
           ? Number(r.amountBase)
@@ -345,12 +335,10 @@ async function summary(req: NextRequest, userId: string) {
     });
   }
 
-  // План бюджета на месяц — список категорий расходов с суммами
   const plan = [...planByCategory.entries()]
     .sort((a, b) => b[1] - a[1])
     .map(([category, amount]) => ({ category, amount: Math.round(amount * 100) / 100 }));
 
-  // Ближайшие погашения — топ-5 по дате (неоплаченные, начиная с сегодня)
   const upcoming = await db
     .select()
     .from(creditPayments)
