@@ -76,34 +76,43 @@ function NavTree({ sections, pathname, onNavigate }: { sections: Section[]; path
   );
 
   function renderSection(sec: Section, depth: number): ReactNode {
-    if (sec.kind === "container") {
-      const kids = childrenOf(sec.id);
-      const open = openGroups[sec.slug ?? sec.id] ?? false;
-      return (
-        <div key={sec.id} className="pt-1.5">
-          <button
-            onClick={() => setOpenGroups((g) => ({ ...g, [sec.slug ?? sec.id]: !open }))}
-            className={cn("nav-item w-full", depth > 0 && "ml-5")}
-          >
-            <SectionIcon icon={sec.icon} />
-            <span className="flex-1 truncate text-left">{sec.name}</span>
-            <ChevronDown size={14} className={cn("transition-transform duration-200", open && "rotate-180")} />
-          </button>
-          <div className={cn("grid transition-all duration-200", open ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0")}>
-            <div className="overflow-hidden">
-              {kids.map((c) => renderSection(c, depth + 1))}
-              {!kids.length && <p className="ml-9 py-1 text-xs text-slate-600">пусто</p>}
-            </div>
-          </div>
-        </div>
-      );
-    }
+  // «Бюджет» — это страница с вкладками, а не контейнер с подразделами.
+  // Рендерим его как простую ссылку, без ChevronDown.
+  if (sec.slug === "budget") {
     return (
       <div key={sec.id} className="pt-0.5">
         {link(`/sections/${sec.id}`, sec.name, <SectionIcon icon={sec.icon} />, depth)}
       </div>
     );
   }
+
+  if (sec.kind === "container") {
+    const kids = childrenOf(sec.id);
+    const open = openGroups[sec.slug ?? sec.id] ?? false;
+    return (
+      <div key={sec.id} className="pt-1.5">
+        <button
+          onClick={() => setOpenGroups((g) => ({ ...g, [sec.slug ?? sec.id]: !open }))}
+          className={cn("nav-item w-full", depth > 0 && "ml-5")}
+        >
+          <SectionIcon icon={sec.icon} />
+          <span className="flex-1 truncate text-left">{sec.name}</span>
+          <ChevronDown size={14} className={cn("transition-transform duration-200", open && "rotate-180")} />
+        </button>
+        <div className={cn("grid transition-all duration-200", open ? "grid-rows-[1fr] opacity-100" : "grid-rows-[0fr] opacity-0")}>
+          <div className="overflow-hidden">
+            {kids.map((c) => renderSection(c, depth + 1))}
+            {!kids.length && <p className="ml-9 py-1 text-xs text-slate-600">пусто</p>}
+          </div>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div key={sec.id} className="pt-0.5">
+      {link(`/sections/${sec.id}`, sec.name, <SectionIcon icon={sec.icon} />, depth)}
+    </div>
+  );
 }
 
 function NewSectionDialog({ open, onClose, sections }: { open: boolean; onClose: () => void; sections: Section[] }) {
