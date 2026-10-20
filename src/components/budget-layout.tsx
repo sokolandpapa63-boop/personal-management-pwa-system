@@ -1,8 +1,9 @@
 "use client";
 
+import { Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { LayoutDashboard, TrendingUp, CreditCard } from "lucide-react";
-import { cn } from "@/components/ui";
+import { cn, Spinner } from "@/components/ui";
 import type { Section } from "@/lib/client/hooks";
 import { BudgetDashboard } from "./budget-dashboard";
 import { BudgetIncomeExpenseTable } from "./budget-income-expense-table";
@@ -16,7 +17,7 @@ const TABS = [
 
 type TabId = (typeof TABS)[number]["id"];
 
-export function BudgetLayout({ section }: { section: Section }) {
+function BudgetTabs({ section }: { section: Section }) {
   const router = useRouter();
   const searchParams = useSearchParams();
   const raw = searchParams.get("tab");
@@ -30,7 +31,6 @@ export function BudgetLayout({ section }: { section: Section }) {
 
   return (
     <div className="space-y-4">
-      {/* Вкладки — как в браузере */}
       <div className="flex gap-1 overflow-x-auto rounded-xl border border-slate-800 bg-slate-900/50 p-1">
         {TABS.map((t) => {
           const Icon = t.icon;
@@ -53,10 +53,17 @@ export function BudgetLayout({ section }: { section: Section }) {
         })}
       </div>
 
-      {/* Содержимое вкладки */}
       {active === "dashboard" && <BudgetDashboard section={section} />}
       {active === "income" && <BudgetIncomeExpenseTable section={section} />}
       {active === "credits" && <BudgetCreditsSettings section={section} />}
     </div>
+  );
+}
+
+export function BudgetLayout({ section }: { section: Section }) {
+  return (
+    <Suspense fallback={<div className="glass rounded-2xl"><Spinner label="Загрузка вкладок…" /></div>}>
+      <BudgetTabs section={section} />
+    </Suspense>
   );
 }
